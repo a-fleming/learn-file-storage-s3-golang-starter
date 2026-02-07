@@ -1,10 +1,12 @@
 package main
 
 import (
-	"encoding/base64"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
+	"os"
+	"path/filepath"
 
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
 	"github.com/google/uuid"
@@ -30,25 +32,6 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	fmt.Println("uploading thumbnail for video", videoID, "by user", userID)
-
-	const maxMemory = 10 << 20
-	err = r.ParseMultipartForm(maxMemory)
-	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Couldn't parse thumbnail", err)
-		return
-	}
-	key := "thumbnail"
-	fileData, _, err := r.FormFile(key)
-	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Couldn't retrieve thumbnail data", err)
-		return
-	}
-	dataBytes, err := io.ReadAll(fileData)
-	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Couldn't read thumbnail data", err)
-		return
-	}
 	videoMetadata, err := cfg.db.GetVideo(videoID)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Couldn't retrieve video data", err)
@@ -59,9 +42,46 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	dataBase64 := base64.StdEncoding.EncodeToString(dataBytes)
-	dataURL := fmt.Sprintf("data:<media-type>;base64,%s", dataBase64)
-	videoMetadata.ThumbnailURL = &dataURL
+	fmt.Println("uploading thumbnail for video", videoID, "by user", userID)
+
+	const maxMemory = 10 << 20
+	err = r.ParseMultipartForm(maxMemory)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't parse thumbnail", err)
+		return
+	}
+	key := "thumbnail"
+	fileData, fileHeaders, err := r.FormFile(key)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't retrieve thumbnail data", err)
+		return
+	}
+
+	mimeType := fileHeaders.Header.Get("Content-Type")
+	extensions, err := mime.ExtensionsByType(mimeType)
+	if err != nil {
+		msg := "Unable to parse file type"
+		respondWithError(w, http.StatusBadRequest, msg, err)
+		return
+	}
+	if len(extensions) == 0 {
+		msg := fmt.Sprintf("No extensions found for %s", mimeType)
+		respondWithError(w, http.StatusBadRequest, msg, nil)
+		return
+	}
+	fileName := fmt.Sprintf("%s%s", videoID, extensions[0])
+	filePath := filepath.Join(cfg.assetsRoot, fileName)
+
+	newFile, err := os.Create(filePath)
+	_, err = io.Copy(newFile, fileData)
+	if err != nil {
+		msg := "Couldn't write thumbnail to file"
+		respondWithError(w, http.StatusInternalServerError, msg, err)
+		return
+	}
+
+	thumbnailURL := fmt.Sprintf("http://%s:%s/%s", baseWebsiteURL, cfg.port, filePath)
+	videoMetadata.ThumbnailURL = &thumbnailURL
 
 	err = cfg.db.UpdateVideo(videoMetadata)
 	if err != nil {

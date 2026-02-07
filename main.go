@@ -23,16 +23,12 @@ type apiConfig struct {
 	port             string
 }
 
-type thumbnail struct {
-	data      []byte
-	mediaType string
-}
-
-// var videoThumbnails = map[uuid.UUID]thumbnail{}
+// type thumbnail struct {
+// 	data      []byte
+// 	mediaType string
+// }
 
 const baseWebsiteURL = "172.29.217.92"
-
-// const baseWebsiteURL = "localhost"
 
 func main() {
 	godotenv.Load(".env")
@@ -131,6 +127,6 @@ func main() {
 		Handler: mux,
 	}
 
-	log.Printf("Serving on: http://localhost:%s/app/\n", port)
+	log.Printf("Serving on: http://%s:%s/app/\n", baseWebsiteURL, port)
 	log.Fatal(srv.ListenAndServe())
 }

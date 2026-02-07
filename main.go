@@ -31,6 +31,10 @@ type thumbnail struct {
 
 var videoThumbnails = map[uuid.UUID]thumbnail{}
 
+const baseWebsiteURL = "172.29.217.92"
+
+// const baseWebsiteURL = "localhost"
+
 func main() {
 	godotenv.Load(".env")
 

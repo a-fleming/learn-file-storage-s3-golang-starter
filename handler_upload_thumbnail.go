@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"fmt"
 	"io"
 	"net/http"
@@ -38,13 +39,12 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	key := "thumbnail"
-	fileData, fileHeaders, err := r.FormFile(key)
+	fileData, _, err := r.FormFile(key)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Couldn't retrieve thumbnail data", err)
 		return
 	}
-	mediaType := fileHeaders.Header.Get("Content-Type")
-	data, err := io.ReadAll(fileData)
+	dataBytes, err := io.ReadAll(fileData)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Couldn't read thumbnail data", err)
 		return
@@ -59,14 +59,10 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	videoThumbnail := thumbnail{
-		data:      data,
-		mediaType: mediaType,
-	}
-	videoThumbnails[videoID] = videoThumbnail
-	thumbnailURL := fmt.Sprintf("http://%s:%s/api/thumbnails/%s", baseWebsiteURL, cfg.port, videoID)
-	fmt.Printf("thubnailURL: %s", thumbnailURL)
-	videoMetadata.ThumbnailURL = &thumbnailURL
+	dataBase64 := base64.StdEncoding.EncodeToString(dataBytes)
+	dataURL := fmt.Sprintf("data:<media-type>;base64,%s", dataBase64)
+	videoMetadata.ThumbnailURL = &dataURL
+
 	err = cfg.db.UpdateVideo(videoMetadata)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Couldn't update thumbnail URL", err)

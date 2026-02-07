@@ -58,6 +58,13 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 	}
 
 	mimeType := fileHeaders.Header.Get("Content-Type")
+	mediaType, _, err := mime.ParseMediaType(mimeType)
+	if mediaType != "image/jpeg" && mediaType != "image/png" {
+		msg := fmt.Sprintf("Invalid media type '%s' provided. Media type must be 'image/jpeg' or 'image/png'", mediaType)
+		respondWithError(w, http.StatusBadRequest, msg, nil)
+		return
+	}
+
 	extensions, err := mime.ExtensionsByType(mimeType)
 	if err != nil {
 		msg := "Unable to parse file type"

@@ -58,6 +58,7 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		respondWithError(w, http.StatusInternalServerError, "Couldn't retrieve thumbnail data", err)
 		return
 	}
+	defer fileData.Close()
 
 	mimeType := fileHeaders.Header.Get("Content-Type")
 	mediaType, _, err := mime.ParseMediaType(mimeType)

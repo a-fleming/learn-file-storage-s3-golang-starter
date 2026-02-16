@@ -1,11 +1,15 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"mime"
 	"net/http"
 	"os"
+	"os/exec"
 
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
@@ -60,20 +64,36 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		respondWithError(w, http.StatusBadRequest, msg, nil)
 		return
 	}
-	tmpFileName := "tubely-upload.mp4"
-	tmpFile, err := os.CreateTemp("", tmpFileName)
+	tmpFile, err := os.CreateTemp("", "tubely-upload.mp4")
 	if err != nil {
 		msg := "Couldn't create temporary file"
 		respondWithError(w, http.StatusInternalServerError, msg, err)
+		return
 	}
-	defer os.Remove("tubely-upload.mp4")
+	defer os.Remove(tmpFile.Name())
 	defer tmpFile.Close()
 
 	_, err = io.Copy(tmpFile, fileData)
 	if err != nil {
 		msg := "Couldn't copy video contents"
 		respondWithError(w, http.StatusInternalServerError, msg, err)
+		return
 	}
+
+	aspectRatio, err := getVideoAspectRatio(tmpFile.Name())
+	if err != nil {
+		msg := "Couldn't calculate aspect ratio"
+		respondWithError(w, http.StatusInternalServerError, msg, err)
+		return
+	}
+	videoPrefix := "other/"
+	if aspectRatio == "9:16" {
+		videoPrefix = "portrait/"
+	}
+	if aspectRatio == "16:9" {
+		videoPrefix = "landscape/"
+	}
+
 	tmpFile.Seek(0, io.SeekStart)
 	randomFilename, err := generateRandomFilename()
 	if err != nil {
@@ -81,7 +101,7 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		respondWithError(w, http.StatusBadRequest, msg, err)
 		return
 	}
-	s3Key := randomFilename + ".mp4"
+	s3Key := videoPrefix + randomFilename + ".mp4"
 
 	putObjectInput := s3.PutObjectInput{
 		Bucket:      &cfg.s3Bucket,
@@ -110,4 +130,122 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	respondWithJSON(w, http.StatusOK, videoMetadata)
+}
+
+func getVideoAspectRatio(filePath string) (string, error) {
+	type videoMetadata struct {
+		Streams []struct {
+			Index              int    `json:"index"`
+			CodecName          string `json:"codec_name,omitempty"`
+			CodecLongName      string `json:"codec_long_name,omitempty"`
+			Profile            string `json:"profile,omitempty"`
+			CodecType          string `json:"codec_type"`
+			CodecTagString     string `json:"codec_tag_string"`
+			CodecTag           string `json:"codec_tag"`
+			Width              int    `json:"width,omitempty"`
+			Height             int    `json:"height,omitempty"`
+			CodedWidth         int    `json:"coded_width,omitempty"`
+			CodedHeight        int    `json:"coded_height,omitempty"`
+			ClosedCaptions     int    `json:"closed_captions,omitempty"`
+			FilmGrain          int    `json:"film_grain,omitempty"`
+			HasBFrames         int    `json:"has_b_frames,omitempty"`
+			SampleAspectRatio  string `json:"sample_aspect_ratio,omitempty"`
+			DisplayAspectRatio string `json:"display_aspect_ratio,omitempty"`
+			PixFmt             string `json:"pix_fmt,omitempty"`
+			Level              int    `json:"level,omitempty"`
+			ColorRange         string `json:"color_range,omitempty"`
+			ColorSpace         string `json:"color_space,omitempty"`
+			ColorTransfer      string `json:"color_transfer,omitempty"`
+			ColorPrimaries     string `json:"color_primaries,omitempty"`
+			ChromaLocation     string `json:"chroma_location,omitempty"`
+			FieldOrder         string `json:"field_order,omitempty"`
+			Refs               int    `json:"refs,omitempty"`
+			IsAvc              string `json:"is_avc,omitempty"`
+			NalLengthSize      string `json:"nal_length_size,omitempty"`
+			ID                 string `json:"id"`
+			RFrameRate         string `json:"r_frame_rate"`
+			AvgFrameRate       string `json:"avg_frame_rate"`
+			TimeBase           string `json:"time_base"`
+			StartPts           int    `json:"start_pts"`
+			StartTime          string `json:"start_time"`
+			DurationTs         int    `json:"duration_ts"`
+			Duration           string `json:"duration"`
+			BitRate            string `json:"bit_rate,omitempty"`
+			BitsPerRawSample   string `json:"bits_per_raw_sample,omitempty"`
+			NbFrames           string `json:"nb_frames"`
+			ExtradataSize      int    `json:"extradata_size"`
+			Disposition        struct {
+				Default         int `json:"default"`
+				Dub             int `json:"dub"`
+				Original        int `json:"original"`
+				Comment         int `json:"comment"`
+				Lyrics          int `json:"lyrics"`
+				Karaoke         int `json:"karaoke"`
+				Forced          int `json:"forced"`
+				HearingImpaired int `json:"hearing_impaired"`
+				VisualImpaired  int `json:"visual_impaired"`
+				CleanEffects    int `json:"clean_effects"`
+				AttachedPic     int `json:"attached_pic"`
+				TimedThumbnails int `json:"timed_thumbnails"`
+				NonDiegetic     int `json:"non_diegetic"`
+				Captions        int `json:"captions"`
+				Descriptions    int `json:"descriptions"`
+				Metadata        int `json:"metadata"`
+				Dependent       int `json:"dependent"`
+				StillImage      int `json:"still_image"`
+				Multilayer      int `json:"multilayer"`
+			} `json:"disposition"`
+			Tags struct {
+				Language    string `json:"language"`
+				HandlerName string `json:"handler_name"`
+				VendorID    string `json:"vendor_id"`
+				Encoder     string `json:"encoder"`
+				Timecode    string `json:"timecode"`
+			} `json:"tags,omitempty"`
+			SampleFmt      string `json:"sample_fmt,omitempty"`
+			SampleRate     string `json:"sample_rate,omitempty"`
+			Channels       int    `json:"channels,omitempty"`
+			ChannelLayout  string `json:"channel_layout,omitempty"`
+			BitsPerSample  int    `json:"bits_per_sample,omitempty"`
+			InitialPadding int    `json:"initial_padding,omitempty"`
+			Tags0          struct {
+				Language    string `json:"language"`
+				HandlerName string `json:"handler_name"`
+				VendorID    string `json:"vendor_id"`
+			} `json:"tags,omitempty"`
+			Tags1 struct {
+				Language    string `json:"language"`
+				HandlerName string `json:"handler_name"`
+				Timecode    string `json:"timecode"`
+			} `json:"tags,omitempty"`
+		} `json:"streams"`
+	}
+	cmd := exec.Command("ffprobe", "-v", "error", "-print_format", "json", "-show_streams", filePath)
+	var outBuffer bytes.Buffer
+	cmd.Stdout = &outBuffer
+	cmd.Run()
+
+	vidMetadata := videoMetadata{}
+	err := json.Unmarshal(outBuffer.Bytes(), &vidMetadata)
+	if err != nil {
+		return "", err
+	}
+	height := vidMetadata.Streams[0].Height
+	width := vidMetadata.Streams[0].Width
+	return calculateAspectRatio(width, height), nil
+}
+
+func calculateAspectRatio(width, height int) string {
+	sixteenByNine := 16.0 / 9.0
+	nineBySixteen := 9.0 / 16.0
+	ratio := float64(width) / float64(height)
+
+	tolerange := 0.1
+	if math.Abs(ratio-sixteenByNine) <= tolerange {
+		return "16:9"
+	}
+	if math.Abs(ratio-nineBySixteen) <= tolerange {
+		return "9:16"
+	}
+	return "other"
 }

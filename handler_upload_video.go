@@ -94,7 +94,21 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		videoPrefix = "landscape/"
 	}
 
-	tmpFile.Seek(0, io.SeekStart)
+	processedFileName, err := processVideoForFastStart(tmpFile.Name())
+	if err != nil {
+		msg := "Couldn't process video for fast start"
+		respondWithError(w, http.StatusInternalServerError, msg, err)
+		return
+	}
+	processedFile, err := os.Open(processedFileName)
+	if err != nil {
+		msg := "Couldn't open processed video"
+		respondWithError(w, http.StatusInternalServerError, msg, err)
+		return
+	}
+	defer os.Remove(processedFileName)
+	defer processedFile.Close()
+
 	randomFilename, err := generateRandomFilename()
 	if err != nil {
 		msg := "Unable to generate filename"
@@ -106,7 +120,7 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 	putObjectInput := s3.PutObjectInput{
 		Bucket:      &cfg.s3Bucket,
 		Key:         &s3Key,
-		Body:        tmpFile,
+		Body:        processedFile,
 		ContentType: &mimeType,
 	}
 	_, err = cfg.s3Client.PutObject(r.Context(), &putObjectInput)
@@ -223,10 +237,13 @@ func getVideoAspectRatio(filePath string) (string, error) {
 	cmd := exec.Command("ffprobe", "-v", "error", "-print_format", "json", "-show_streams", filePath)
 	var outBuffer bytes.Buffer
 	cmd.Stdout = &outBuffer
-	cmd.Run()
+	err := cmd.Run()
+	if err != nil {
+		return "", err
+	}
 
 	vidMetadata := videoMetadata{}
-	err := json.Unmarshal(outBuffer.Bytes(), &vidMetadata)
+	err = json.Unmarshal(outBuffer.Bytes(), &vidMetadata)
 	if err != nil {
 		return "", err
 	}
@@ -248,4 +265,21 @@ func calculateAspectRatio(width, height int) string {
 		return "9:16"
 	}
 	return "other"
+}
+
+func processVideoForFastStart(filePath string) (string, error) {
+	outputPath := filePath + ".processing"
+	cmd := exec.Command(
+		"ffmpeg",
+		"-i", filePath,
+		"-c", "copy",
+		"-movflags", "faststart",
+		"-f", "mp4",
+		outputPath,
+	)
+	err := cmd.Run()
+	if err != nil {
+		return "", err
+	}
+	return outputPath, nil
 }
